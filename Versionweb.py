@@ -1,9 +1,8 @@
 import streamlit as st
-from PIL import Image
 import pandas as pd
 import rispy
-import io
 import re
+from io import BytesIO
 
 # Diccionario para almacenar archivos por etiqueta
 etiquetas_archivos = {}
@@ -15,47 +14,36 @@ def limpiar_titulo(titulo):
     titulo = re.sub(r'[^\w\s]', '', titulo)
     return titulo
 
-st.set_page_config(page_title="FiltroPapers - B-Tech", layout="wide")
+st.title("Filtrado de papers por Titulo - B-Tech")
 
-# Logo y título
-try:
-    img = Image.open("logo.png")
-    st.image(img, width=80)
-except Exception as e:
-    st.write(f"No se pudo cargar el logo: {e}")
-
-st.title("Filtrado de papers por Título - B-Tech")
-
-# Instrucciones
-st.write("""
-Esta herramienta te permite filtrar y procesar los resultados de búsqueda de bases de datos, eliminando artículos repetidos y permitiendo asignar etiquetas.
+st.markdown("""
+Esta herramienta permite filtrar y procesar resultados de búsqueda de diferentes bases de datos,
+eliminando artículos repetidos y asignando etiquetas a los resultados.
 """)
 
-# Agregar nueva etiqueta
-nombre_etiqueta = st.text_input("Nombre de nueva etiqueta")
-archivos_subidos = st.file_uploader(
-    "Sube archivos (.ris o .csv) para esta etiqueta",
-    type=["ris", "csv"],
-    accept_multiple_files=True
-)
-
-if st.button("Agregar etiqueta y archivos"):
-    if nombre_etiqueta and archivos_subidos:
-        etiquetas_archivos[nombre_etiqueta] = archivos_subidos
-        st.success(f"Etiqueta '{nombre_etiqueta}' agregada con {len(archivos_subidos)} archivos.")
-    else:
-        st.warning("Debes ingresar un nombre y subir al menos un archivo.")
+# Formulario para agregar etiqueta y archivos
+with st.form("agregar_etiqueta"):
+    nombre_etiqueta = st.text_input("Nombre del tema o etiqueta")
+    archivos = st.file_uploader(
+        "Selecciona archivos (.ris o .csv)",
+        type=["ris", "csv"],
+        accept_multiple_files=True
+    )
+    submitted = st.form_submit_button("Agregar")
+    if submitted and nombre_etiqueta and archivos:
+        etiquetas_archivos[nombre_etiqueta] = archivos
+        st.success(f"Etiqueta '{nombre_etiqueta}' agregada con {len(archivos)} archivos.")
 
 # Mostrar etiquetas actuales
 if etiquetas_archivos:
     st.subheader("Etiquetas actuales")
-    for etq, files in etiquetas_archivos.items():
-        st.write(f"**{etq}**: {len(files)} archivos")
+    for etq, archivos in etiquetas_archivos.items():
+        st.write(f"**{etq}** ({len(archivos)} archivos)")
 
 # Procesar y generar Excel
 if st.button("Procesar y generar Excel"):
     if not etiquetas_archivos:
-        st.warning("No hay etiquetas para procesar.")
+        st.warning("Primero debes agregar al menos una etiqueta.")
     else:
         articulos = []
         resumen_etiquetas = {}
@@ -66,7 +54,7 @@ if st.button("Procesar y generar Excel"):
             for archivo in archivos:
                 if archivo.name.endswith(".ris"):
                     try:
-                        entries = rispy.load(io.TextIOWrapper(archivo, encoding='utf-8'))
+                        entries = rispy.load(fileobj=archivo)
                         for entry in entries:
                             encontrados += 1
                             articulos.append({
@@ -105,7 +93,6 @@ if st.button("Procesar y generar Excel"):
             resumen_etiquetas[etiqueta] = encontrados
             total_original += encontrados
 
-        # Quitar duplicados
         df = pd.DataFrame(articulos)
         num_antes = len(df)
         df_unique = df.drop_duplicates(subset='Titulo_limpio', keep='first').reset_index(drop=True)
@@ -114,7 +101,6 @@ if st.button("Procesar y generar Excel"):
         df_unique.insert(0, '#', range(1, len(df_unique) + 1))
         df_unique = df_unique.drop(columns=['Titulo_limpio'])
 
-        # Resumen
         resumen_filas = [
             f"Número de etiquetas: {len(etiquetas_archivos)}",
             *[f"'{etq}': {cantidad} artículos" for etq, cantidad in resumen_etiquetas.items()],
@@ -125,8 +111,8 @@ if st.button("Procesar y generar Excel"):
 
         reporte = pd.DataFrame({'Resumen': resumen_filas})
 
-        # Guardar en memoria y ofrecer descarga
-        output = io.BytesIO()
+        # Guardar en memoria para descarga
+        output = BytesIO()
         with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
             reporte.to_excel(writer, index=False, header=False, startrow=0)
             df_unique.to_excel(writer, index=False, startrow=len(resumen_filas) + 2)
@@ -138,3 +124,5 @@ if st.button("Procesar y generar Excel"):
             file_name="reporte_filtrado.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+        st.success("Reporte generado con éxito.")
